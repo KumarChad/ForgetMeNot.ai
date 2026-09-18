@@ -89,16 +89,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'OPEN_SIDE_PANEL') {
-    // Open side panel from voice overlay's "Open full panel" button
-    chrome.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
-      if (tab?.id) {
-        chrome.sidePanel.open({ tabId: tab.id });
-      }
-    });
-    return false;
-  }
-
   if (message.type === 'CLOSE_PANEL') {
     if (_sender.tab?.id) {
       (chrome.sidePanel as any).close({ tabId: _sender.tab.id });

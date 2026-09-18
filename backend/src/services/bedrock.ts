@@ -1,13 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 
-const BEDROCK_API_KEY = process.env.BEDROCK_API_KEY || '';
-const AWS_REGION = process.env.AWS_REGION || 'us-east-1';
-const MODEL_ID = process.env.BEDROCK_MODEL_ID || 'amazon.nova-lite-v1:0';
-
-const BEDROCK_URL = `https://bedrock-runtime.${AWS_REGION}.amazonaws.com/model/${encodeURIComponent(MODEL_ID)}/invoke`;
-
-// Load AI instructions from markdown file (cached at startup)
+// Load AI instructions from markdown file (cached after first read)
 let _aiInstructions: string | null = null;
 
 export function getAIInstructions(): string {
@@ -24,7 +18,6 @@ export function getAIInstructions(): string {
   return _aiInstructions;
 }
 
-// Reload instructions (call this if you edit the file at runtime)
 export function reloadAIInstructions(): void {
   _aiInstructions = null;
   getAIInstructions();
@@ -44,17 +37,21 @@ export async function queryBedrock(
   const {
     systemPrompt,
     maxTokens = 1024,
-    temperature = 0.3,  // Lower default for more precise search results
+    temperature = 0.3,
     topP = 0.9,
   } = options;
 
-  // If no API key configured, return a mock response
-  if (!BEDROCK_API_KEY) {
+  // Read env vars HERE (not at module load) so dotenv.config() has already run
+  const apiKey = process.env.BEDROCK_API_KEY || '';
+  const region = process.env.AWS_REGION || 'us-east-1';
+  const modelId = process.env.BEDROCK_MODEL_ID || 'amazon.nova-lite-v1:0';
+  const bedrockUrl = `https://bedrock-runtime.${region}.amazonaws.com/model/${encodeURIComponent(modelId)}/invoke`;
+
+  if (!apiKey) {
     console.log('   ⚠️  Bedrock not configured — using mock AI response');
     return mockBedrockResponse(prompt);
   }
 
-  // Build the request body with optional system prompt
   const requestBody: any = {
     messages: [
       {
@@ -69,17 +66,16 @@ export async function queryBedrock(
     },
   };
 
-  // Add system prompt if provided (Nova Lite supports system messages)
   if (systemPrompt) {
     requestBody.system = [{ text: systemPrompt }];
   }
 
-  const response = await fetch(BEDROCK_URL, {
+  const response = await fetch(bedrockUrl, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      Authorization: `Bearer ${BEDROCK_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify(requestBody),
   });
@@ -91,14 +87,11 @@ export async function queryBedrock(
   }
 
   const responseBody: any = await response.json();
-
-  // Nova response format: output.message.content[0].text
   return responseBody.output.message.content[0].text;
 }
 
 function mockBedrockResponse(prompt: string): string {
-  if (prompt.includes('generate search queries') || prompt.includes('search strategies')) {
-    // Return a mock JSON for the new multi-strategy format
+  if (prompt.includes('generate search queries') || prompt.includes('search strategies') || prompt.includes('search query generator')) {
     const match = prompt.match(/User query: "(.+?)"/);
     const query = match ? match[1] : 'search';
     return JSON.stringify({
@@ -108,8 +101,8 @@ function mockBedrockResponse(prompt: string): string {
     });
   }
 
-  if (prompt.includes('rank and summarize') || prompt.includes('summarize these search results')) {
-    return `Here are the most relevant results for your search.`;
+  if (prompt.includes('rank and summarize') || prompt.includes('summarize') || prompt.includes('summary')) {
+    return 'Here are the most relevant results for your search.';
   }
 
   return 'Mock AI response — configure Bedrock for real responses.';

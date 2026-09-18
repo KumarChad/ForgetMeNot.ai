@@ -5,9 +5,10 @@
  * Shows a floating mini popup, listens for voice, searches, shows top results.
  */
 
-// Prevent double-injection
-if (!(window as any).__forgetmenot_voice_loaded) {
-  (window as any).__forgetmenot_voice_loaded = true;
+// Allow re-triggering — close any existing overlay first
+(function() {
+  const existing = document.getElementById('forgetmenot-voice-overlay');
+  if (existing) existing.remove();
 
   const API_BASE = 'http://localhost:3001';
 
@@ -260,6 +261,26 @@ if (!(window as any).__forgetmenot_voice_loaded) {
           color: #9ca3af;
         }
 
+        .fmn-mic-btn {
+          background: linear-gradient(135deg, #6366f1, #8b5cf6);
+          border: none;
+          color: white;
+          width: 32px;
+          height: 32px;
+          border-radius: 50%;
+          cursor: pointer;
+          font-size: 15px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          transition: transform 0.15s, box-shadow 0.15s;
+          flex-shrink: 0;
+        }
+        .fmn-mic-btn:hover {
+          transform: scale(1.1);
+          box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+        }
+
         .fmn-error {
           color: #dc2626;
           font-size: 13px;
@@ -354,13 +375,12 @@ if (!(window as any).__forgetmenot_voice_loaded) {
       const footer = document.createElement('div');
       footer.className = 'fmn-footer';
       footer.innerHTML = `
-        <button class="fmn-open-panel" id="fmn-open-panel-btn">Open full panel →</button>
-        <span class="fmn-shortcut-hint">Ctrl+Space to search again</span>
+        <button class="fmn-mic-btn" id="fmn-mic-again-btn" title="Search again">🎙️</button>
       `;
       popup.appendChild(footer);
 
-      footer.querySelector('#fmn-open-panel-btn')?.addEventListener('click', () => {
-        chrome.runtime.sendMessage({ type: 'OPEN_SIDE_PANEL' });
+      footer.querySelector('#fmn-mic-again-btn')?.addEventListener('click', () => {
+        startVoiceSearch();
       });
     }
   }
@@ -399,7 +419,7 @@ if (!(window as any).__forgetmenot_voice_loaded) {
     } else {
       overlay.remove();
     }
-    (window as any).__forgetmenot_voice_loaded = false;
+
   }
 
   // ─── Main flow ─────────────────────────────────────────────────
@@ -509,4 +529,4 @@ if (!(window as any).__forgetmenot_voice_loaded) {
 
   // Start immediately on injection
   startVoiceSearch();
-}
+})();

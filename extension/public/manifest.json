@@ -1,19 +1,21 @@
 {
   "manifest_version": 3,
-  "name": "ForgetMeNot — AI Search Assistant",
+  "name": "ForgetMeNot \u2014 AI Search Assistant",
   "version": "1.0.0",
-  "description": "Your AI assistant that never forgets — search across Gmail, Drive, Slack & more",
+  "description": "Your AI assistant that never forgets \u2014 search across Gmail, Drive, Slack & more",
   "permissions": [
     "activeTab",
     "storage",
     "identity",
     "sidePanel",
-    "scripting"
+    "scripting",
+    "tabs"
   ],
   "host_permissions": [
     "https://*.googleapis.com/*",
     "https://slack.com/api/*",
-    "<all_urls>"
+    "<all_urls>",
+    "http://localhost:3001/*"
   ],
   "action": {
     "default_icon": {
