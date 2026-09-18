@@ -14,6 +14,31 @@ chrome.action.onClicked.addListener(async (tab) => {
 // Enable side panel on all pages
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true });
 
+// ─── Onboarding on first install ─────────────────────────────────
+chrome.runtime.onInstalled.addListener(async (details) => {
+  if (details.reason === 'install') {
+    // Mark that onboarding hasn't been completed yet
+    await chrome.storage.local.set({ onboardingDone: false });
+
+    // Wait a moment, then inject onboarding into the active tab
+    setTimeout(async () => {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id && tab.url && !tab.url.startsWith('chrome://')) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ['onboarding.js'],
+          });
+        } catch (err) {
+          console.error('Failed to inject onboarding:', err);
+        }
+      }
+    }, 500);
+  }
+});
+
+
+
 // ─── Voice search command (Ctrl+Space) ───────────────────────────
 chrome.commands.onCommand.addListener(async (command) => {
   if (command === 'voice_search') {
@@ -89,7 +114,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
-  if (message.type === 'CLOSE_PANEL') {
+  if (message.type === 'ONBOARDING_DONE') {
+    chrome.storage.local.set({ onboardingDone: true });
+    return false;
+  }
+
+    if (message.type === 'CLOSE_PANEL') {
     if (_sender.tab?.id) {
       (chrome.sidePanel as any).close({ tabId: _sender.tab.id });
     }

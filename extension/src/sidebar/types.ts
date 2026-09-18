@@ -36,3 +36,19 @@ export interface PageContext {
   title: string;
   domain: string;
 }
+
+// Chat history types
+export interface ChatMessage {
+  id: string;
+  query: string;
+  response: SearchResponse;
+  timestamp: number;
+}
+
+export interface ChatConversation {
+  id: string;
+  messages: ChatMessage[];
+  createdAt: number;
+  updatedAt: number;
+  title: string; // first query as title
+}

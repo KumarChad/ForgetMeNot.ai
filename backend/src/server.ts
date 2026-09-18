@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import { searchRouter } from './routes/search';
 import { authRouter } from './routes/auth';
+import { downloadRouter } from './routes/download';
 import { metrics } from './services/metrics';
 
 dotenv.config();
@@ -22,6 +23,7 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api/search', searchRouter);
 app.use('/api/auth', authRouter);
+app.use('/api/download', downloadRouter);
 
 // ─── Metrics endpoint ────────────────────────────────────────────────
 app.get('/api/metrics', (_req, res) => {

@@ -28,11 +28,13 @@ export default defineConfig({
         sidepanel: resolve(__dirname, 'sidepanel.html'),
         background: resolve(__dirname, 'src/background/background.ts'),
         'voice-overlay': resolve(__dirname, 'src/content/voice-overlay.ts'),
+        'onboarding': resolve(__dirname, 'src/content/onboarding.ts'),
       },
       output: {
         entryFileNames: (chunkInfo) => {
           if (chunkInfo.name === 'background') return 'background.js';
           if (chunkInfo.name === 'voice-overlay') return 'voice-overlay.js';
+          if (chunkInfo.name === 'onboarding') return 'onboarding.js';
           return 'assets/[name]-[hash].js';
         },
         chunkFileNames: 'assets/[name]-[hash].js',

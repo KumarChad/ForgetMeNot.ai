@@ -185,13 +185,23 @@
           gap: 10px;
           padding: 10px;
           border-radius: 10px;
-          cursor: pointer;
-          transition: background 0.15s;
+          cursor: grab;
+          transition: background 0.15s, opacity 0.15s, transform 0.15s;
           text-decoration: none;
           color: inherit;
           align-items: flex-start;
+          user-select: none;
         }
         .fmn-result-item:hover { background: #f5f3ff; }
+        .fmn-result-item.fmn-dragging { opacity: 0.5; transform: scale(0.97); }
+
+        .fmn-drag-hint {
+          color: #9ca3af;
+          font-size: 11px;
+          flex-shrink: 0;
+          align-self: center;
+          opacity: 0.5;
+        }
 
         .fmn-result-badge {
           width: 32px;
@@ -348,14 +358,24 @@
     let resultsHTML = topResults
       .map((r: any) => {
         const badge = badgeFor(r.source);
+        // Extract raw file ID for download proxy
+        const rawId = r.id.replace(/^(gmail|drive|slack|notion)-/, '');
+        const downloadUrl = r.source === 'drive' ? `${API_BASE}/api/download/drive/${rawId}` : '';
+        const fileName = r.title || 'file';
         return `
-          <a class="fmn-result-item" href="${r.url}" target="_blank" rel="noopener">
+          <a class="fmn-result-item" href="${r.url}" target="_blank" rel="noopener"
+             draggable="true"
+             data-url="${escapeHtml(r.url)}"
+             data-download-url="${escapeHtml(downloadUrl)}"
+             data-filename="${escapeHtml(fileName)}"
+             data-source="${escapeHtml(r.source)}">
             <div class="fmn-result-badge ${badge.cls}">${badge.letter}</div>
             <div class="fmn-result-info">
               <div class="fmn-result-title">${escapeHtml(r.title)}</div>
               <div class="fmn-result-snippet">${escapeHtml(r.snippet || '')}</div>
               <div class="fmn-result-meta">${r.author ? escapeHtml(r.author) + ' · ' : ''}${timeAgo(r.timestamp)}</div>
             </div>
+            <span class="fmn-drag-hint">☰</span>
           </a>`;
       })
       .join('');
@@ -364,6 +384,42 @@
       <div class="fmn-answer">${escapeHtml(data.answer)}</div>
       <ul class="fmn-results">${resultsHTML}</ul>
     `;
+
+    // Attach drag-and-drop handlers to result items
+    body.querySelectorAll('.fmn-result-item').forEach((el) => {
+      el.addEventListener('dragstart', (e: Event) => {
+        const de = e as DragEvent;
+        const item = de.currentTarget as HTMLElement;
+        item.classList.add('fmn-dragging');
+
+        const url = item.getAttribute('data-url') || '';
+        const downloadUrl = item.getAttribute('data-download-url') || '';
+        const filename = item.getAttribute('data-filename') || 'file';
+
+        // For web app drops (Slack, Gmail compose, etc.)
+        de.dataTransfer!.setData('text/uri-list', url);
+        de.dataTransfer!.setData('text/plain', url);
+
+        // For desktop drops (File Explorer, Finder)
+        if (downloadUrl) {
+          de.dataTransfer!.setData('DownloadURL', `application/octet-stream:${filename}:${downloadUrl}`);
+        }
+
+        de.dataTransfer!.effectAllowed = 'copyLink';
+
+        // Custom drag ghost
+        const ghost = document.createElement('div');
+        ghost.textContent = `📎 ${filename}`;
+        ghost.style.cssText = 'position:absolute;top:-1000px;padding:8px 14px;background:#6366f1;color:white;border-radius:8px;font-size:13px;font-family:sans-serif;white-space:nowrap;max-width:260px;overflow:hidden;text-overflow:ellipsis;';
+        document.body.appendChild(ghost);
+        de.dataTransfer!.setDragImage(ghost, 0, 0);
+        setTimeout(() => ghost.remove(), 0);
+      });
+
+      el.addEventListener('dragend', (e: Event) => {
+        (e.currentTarget as HTMLElement).classList.remove('fmn-dragging');
+      });
+    });
 
     // Add footer
     const popup = body.closest('.fmn-popup');

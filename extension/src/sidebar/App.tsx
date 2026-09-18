@@ -1,6 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useSpeechRecognition } from './useSpeechRecognition';
-import type { SearchResult, SearchResponse, ConnectedSource } from './types';
+import type { SearchResult, SearchResponse, ConnectedSource, ChatConversation } from './types';
+import {
+  loadConversations,
+  saveConversation,
+  deleteConversation,
+  clearAllConversations,
+  createConversation,
+  addMessageToConversation,
+} from './chatHistory';
 
 const HINT_QUERIES = [
   'Find the budget doc Sarah shared',
@@ -33,11 +41,107 @@ function formatTimestamp(ts: string): string {
   }
 }
 
+function formatConvoTime(ts: number): string {
+  const date = new Date(ts);
+  const now = new Date();
+  const diffMs = now.getTime() - date.getTime();
+  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) {
+    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  } else if (diffDays === 1) {
+    return 'Yesterday';
+  } else if (diffDays < 7) {
+    return `${diffDays}d ago`;
+  } else {
+    return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  }
+}
+
+const API_BASE = 'http://localhost:3001';
+
+/**
+ * Extracts the raw file ID from our result IDs (e.g. "drive-abc123" → "abc123")
+ */
+function extractFileId(result: SearchResult): string {
+  return result.id.replace(/^(gmail|drive|slack|notion)-/, '');
+}
+
+/**
+ * Build the download URL for drag-and-drop to desktop.
+ * Drive files go through our backend proxy. Gmail results link to the web.
+ */
+function getDownloadUrl(result: SearchResult): string | null {
+  if (result.source === 'drive') {
+    const fileId = extractFileId(result);
+    return `${API_BASE}/api/download/drive/${fileId}`;
+  }
+  // Gmail, Slack, Notion — no direct file download, use the web URL
+  return null;
+}
+
+function getFilenameFromResult(result: SearchResult): string {
+  const title = result.title || 'file';
+  // Add extension if it doesn't have one
+  if (result.source === 'drive' && !title.includes('.')) {
+    const typeExt: Record<string, string> = {
+      document: '.pdf',
+      spreadsheet: '.xlsx',
+      presentation: '.pptx',
+      file: '',
+    };
+    return title + (typeExt[result.type] || '');
+  }
+  return title;
+}
+
 function ResultCard({ result }: { result: SearchResult }) {
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleDragStart = (e: React.DragEvent) => {
+    setIsDragging(true);
+
+    // Always set the URL for web app drops (Slack, Gmail compose, etc.)
+    e.dataTransfer.setData('text/uri-list', result.url);
+    e.dataTransfer.setData('text/plain', result.url);
+
+    // For desktop drops: use DownloadURL if we have a download proxy
+    const downloadUrl = getDownloadUrl(result);
+    if (downloadUrl) {
+      const filename = getFilenameFromResult(result);
+      const mime = 'application/octet-stream';
+      // Chrome's DownloadURL format: "mime:filename:url"
+      e.dataTransfer.setData('DownloadURL', `${mime}:${filename}:${downloadUrl}`);
+    }
+
+    e.dataTransfer.effectAllowed = 'copyLink';
+
+    // Custom drag image
+    const ghost = document.createElement('div');
+    ghost.textContent = `\u{1F4CE} ${result.title}`;
+    ghost.style.cssText = 'position:absolute;top:-1000px;padding:8px 14px;background:#6366f1;color:white;border-radius:8px;font-size:13px;font-family:sans-serif;white-space:nowrap;max-width:280px;overflow:hidden;text-overflow:ellipsis;';
+    document.body.appendChild(ghost);
+    e.dataTransfer.setDragImage(ghost, 0, 0);
+    setTimeout(() => ghost.remove(), 0);
+  };
+
+  const handleDragEnd = () => {
+    setIsDragging(false);
+  };
+
   return (
     <div
       className="result-card"
       onClick={() => window.open(result.url, '_blank')}
+      draggable
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      style={{
+        opacity: isDragging ? 0.6 : 1,
+        cursor: 'grab',
+        transition: 'opacity 0.15s, transform 0.15s',
+        transform: isDragging ? 'scale(0.97)' : 'scale(1)',
+      }}
     >
       <div className="result-card-header">
         <div className={`result-source-icon ${result.source}`}>
@@ -52,6 +156,13 @@ function ResultCard({ result }: { result: SearchResult }) {
             {' · '}
             <span style={{ textTransform: 'capitalize' }}>{result.source}</span>
           </div>
+        </div>
+        {/* Drag handle hint */}
+        <div style={{
+          color: 'var(--text-muted)', fontSize: '11px', flexShrink: 0,
+          opacity: 0.5, marginLeft: '4px',
+        }} title="Drag to any app">
+          ☰
         </div>
       </div>
       <div className="result-snippet">{result.snippet}</div>
@@ -70,8 +181,8 @@ function ResultCard({ result }: { result: SearchResult }) {
 export function App() {
   const [query, setQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [response, setResponse] = useState<SearchResponse | null>(null);
   const [showSettings, setShowSettings] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [sources, setSources] = useState<ConnectedSource[]>([
     { id: 'gmail', name: 'Gmail', icon: '✉️', connected: false },
     { id: 'drive', name: 'Drive', icon: '📁', connected: false },
@@ -80,14 +191,29 @@ export function App() {
   ]);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Chat state
+  const [currentConvo, setCurrentConvo] = useState<ChatConversation | null>(null);
+  const [allConversations, setAllConversations] = useState<ChatConversation[]>([]);
 
   const { isListening, transcript, startListening, stopListening, resetTranscript } =
     useSpeechRecognition();
 
-  // Fetch auth status on mount
+  // Load conversations on mount
   useEffect(() => {
     checkAuthStatus();
+    loadConversations().then((convos) => {
+      setAllConversations(convos);
+    });
   }, []);
+
+  // Scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (chatEndRef.current) {
+      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [currentConvo?.messages.length, isLoading]);
 
   const checkAuthStatus = async () => {
     try {
@@ -96,7 +222,7 @@ export function App() {
         setSources((prev) =>
           prev.map((s) => ({
             ...s,
-            connected: (s.id === 'gmail' || s.id === 'drive') 
+            connected: (s.id === 'gmail' || s.id === 'drive')
               ? (res.google?.connected || false)
               : (res[s.id]?.connected || false),
           }))
@@ -107,14 +233,12 @@ export function App() {
     }
   };
 
-  // When speech recognition produces a transcript, put it in the input
   useEffect(() => {
     if (transcript) {
       setQuery(transcript);
     }
   }, [transcript]);
 
-  // Auto-submit when speech recognition ends with a transcript
   useEffect(() => {
     if (!isListening && transcript.trim()) {
       handleSearch(transcript.trim());
@@ -126,8 +250,15 @@ export function App() {
     if (!searchQuery.trim()) return;
 
     setIsLoading(true);
-    setResponse(null);
     setError(null);
+    setShowHistory(false);
+
+    // Create a new conversation if we don't have one
+    let convo = currentConvo;
+    if (!convo) {
+      convo = createConversation();
+      setCurrentConvo(convo);
+    }
 
     try {
       const result = await chrome.runtime.sendMessage({
@@ -138,15 +269,21 @@ export function App() {
       if (result?.error) {
         setError(result.error);
       } else {
-        setResponse(result);
+        const updated = addMessageToConversation(convo, searchQuery, result);
+        setCurrentConvo(updated);
+        await saveConversation(updated);
+        // Refresh conversation list
+        const convos = await loadConversations();
+        setAllConversations(convos);
       }
     } catch (err) {
       console.error('Search failed:', err);
       setError('Search failed — is the backend running?');
     } finally {
       setIsLoading(false);
+      setQuery('');
     }
-  }, []);
+  }, [currentConvo]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -167,6 +304,36 @@ export function App() {
     window.close();
   };
 
+  const handleNewChat = () => {
+    setCurrentConvo(null);
+    setError(null);
+    setQuery('');
+    setShowHistory(false);
+  };
+
+  const handleOpenConversation = (convo: ChatConversation) => {
+    setCurrentConvo(convo);
+    setShowHistory(false);
+    setError(null);
+  };
+
+  const handleDeleteConversation = async (e: React.MouseEvent, convoId: string) => {
+    e.stopPropagation();
+    await deleteConversation(convoId);
+    const convos = await loadConversations();
+    setAllConversations(convos);
+    if (currentConvo?.id === convoId) {
+      setCurrentConvo(null);
+    }
+  };
+
+  const handleClearAll = async () => {
+    await clearAllConversations();
+    setAllConversations([]);
+    setCurrentConvo(null);
+    setShowHistory(false);
+  };
+
   const handleConnect = async (provider: string) => {
     try {
       setError(null);
@@ -180,11 +347,9 @@ export function App() {
       }
       if (res?.started) {
         setShowSettings(false);
-        // Poll for status update after OAuth completes
         const poll = setInterval(async () => {
           await checkAuthStatus();
         }, 2000);
-        // Stop polling after 2 minutes
         setTimeout(() => clearInterval(poll), 120000);
       }
     } catch (err: any) {
@@ -194,6 +359,97 @@ export function App() {
   };
 
   const googleConnected = sources.find((s) => s.id === 'gmail')?.connected || false;
+
+  // History view
+  if (showHistory) {
+    return (
+      <div className="sidebar">
+        <div className="sidebar-header">
+          <div className="logo-area">
+            <div className="logo-icon">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <polyline points="12 6 12 12 16 14" />
+              </svg>
+            </div>
+            <div className="logo-text">History</div>
+          </div>
+          <button className="close-btn" onClick={() => setShowHistory(false)} title="Back">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6 6 18" />
+              <path d="m6 6 12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="results-area" style={{ padding: '16px' }}>
+          {allConversations.length > 0 && (
+            <button
+              onClick={handleClearAll}
+              style={{
+                width: '100%', padding: '8px', marginBottom: '12px',
+                background: 'none', border: '1px solid #fecaca',
+                borderRadius: 'var(--radius-md)', color: '#dc2626',
+                fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+              }}
+            >
+              Clear all history
+            </button>
+          )}
+
+          {allConversations.length === 0 && (
+            <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
+              <p style={{ fontSize: '14px' }}>No conversations yet</p>
+              <p style={{ fontSize: '12px', marginTop: '4px' }}>Your search history will appear here</p>
+            </div>
+          )}
+
+          {allConversations.map((convo) => (
+            <div
+              key={convo.id}
+              onClick={() => handleOpenConversation(convo)}
+              style={{
+                padding: '12px',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md)',
+                marginBottom: '8px',
+                cursor: 'pointer',
+                background: currentConvo?.id === convo.id ? 'var(--bg-secondary)' : 'transparent',
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-secondary)')}
+              onMouseLeave={(e) => (e.currentTarget.style.background = currentConvo?.id === convo.id ? 'var(--bg-secondary)' : 'transparent')}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: '13px', fontWeight: 600,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {convo.title}
+                  </div>
+                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                    {convo.messages.length} {convo.messages.length === 1 ? 'search' : 'searches'} &middot; {formatConvoTime(convo.updatedAt)}
+                  </div>
+                </div>
+                <button
+                  onClick={(e) => handleDeleteConversation(e, convo.id)}
+                  style={{
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    color: 'var(--text-muted)', padding: '2px', flexShrink: 0,
+                    fontSize: '14px', lineHeight: 1,
+                  }}
+                  title="Delete conversation"
+                >
+                  &times;
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   // Settings / Connect view
   if (showSettings) {
@@ -239,7 +495,7 @@ export function App() {
                 background: '#f3f4f6', display: 'flex', alignItems: 'center',
                 justifyContent: 'center', fontSize: '20px',
               }}>
-                🔵
+                {'🔵'}
               </div>
               <div>
                 <div style={{ fontWeight: 600, fontSize: '14px' }}>Google</div>
@@ -284,7 +540,7 @@ export function App() {
                 background: '#f3f4f6', display: 'flex', alignItems: 'center',
                 justifyContent: 'center', fontSize: '20px',
               }}>
-                💬
+                {'💬'}
               </div>
               <div>
                 <div style={{ fontWeight: 600, fontSize: '14px' }}>Slack</div>
@@ -317,7 +573,7 @@ export function App() {
                 background: '#f3f4f6', display: 'flex', alignItems: 'center',
                 justifyContent: 'center', fontSize: '20px',
               }}>
-                📝
+                {'📝'}
               </div>
               <div>
                 <div style={{ fontWeight: 600, fontSize: '14px' }}>Notion</div>
@@ -337,7 +593,9 @@ export function App() {
     );
   }
 
-  // Main search view
+  // Main search / chat view
+  const hasMessages = currentConvo && currentConvo.messages.length > 0;
+
   return (
     <div className="sidebar">
       {/* Header */}
@@ -352,6 +610,37 @@ export function App() {
           <div className="logo-text">ForgetMeNot</div>
         </div>
         <div style={{ display: 'flex', gap: '4px' }}>
+          {/* New Chat button */}
+          <button
+            className="close-btn"
+            onClick={handleNewChat}
+            title="New chat"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 5v14" />
+              <path d="M5 12h14" />
+            </svg>
+          </button>
+          {/* History button */}
+          <button
+            className="close-btn"
+            onClick={() => setShowHistory(true)}
+            title="Chat history"
+            style={{ position: 'relative' }}
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
+            </svg>
+            {allConversations.length > 0 && (
+              <span style={{
+                position: 'absolute', top: '-2px', right: '-2px',
+                width: '8px', height: '8px', borderRadius: '50%',
+                background: 'var(--accent)',
+              }} />
+            )}
+          </button>
+          {/* Settings button */}
           <button
             className="close-btn"
             onClick={() => setShowSettings(true)}
@@ -386,7 +675,134 @@ export function App() {
         ))}
       </div>
 
-      {/* Search Input */}
+      {/* Chat / Results Area */}
+      <div className="results-area">
+        {/* Chat messages */}
+        {hasMessages && currentConvo.messages.map((msg) => (
+          <div key={msg.id} style={{ marginBottom: '16px' }}>
+            {/* User query bubble */}
+            <div style={{
+              display: 'flex', justifyContent: 'flex-end', marginBottom: '8px',
+            }}>
+              <div style={{
+                maxWidth: '85%', padding: '10px 14px',
+                background: 'var(--accent)', color: 'white',
+                borderRadius: '16px 16px 4px 16px',
+                fontSize: '13px', lineHeight: '1.4',
+              }}>
+                {msg.query}
+              </div>
+            </div>
+            {/* AI response */}
+            <div style={{ marginBottom: '4px' }}>
+              <div className="ai-response">
+                <div className="label">AI Summary</div>
+                {msg.response.answer}
+              </div>
+              {msg.response.results.map((result) => (
+                <ResultCard key={result.id} result={result} />
+              ))}
+            </div>
+          </div>
+        ))}
+
+        {/* Loading indicator */}
+        {isLoading && (
+          <div style={{ marginBottom: '16px' }}>
+            {/* Show the query being searched */}
+            <div style={{
+              display: 'flex', justifyContent: 'flex-end', marginBottom: '8px',
+            }}>
+              <div style={{
+                maxWidth: '85%', padding: '10px 14px',
+                background: 'var(--accent)', color: 'white',
+                borderRadius: '16px 16px 4px 16px',
+                fontSize: '13px', lineHeight: '1.4',
+              }}>
+                {query || transcript || 'Searching...'}
+              </div>
+            </div>
+            <div className="loading-container">
+              <div className="loading-dots">
+                <span /><span /><span />
+              </div>
+              <div className="loading-text">Searching across your apps...</div>
+            </div>
+          </div>
+        )}
+
+        {error && !isLoading && (
+          <div style={{
+            padding: '16px', background: '#fef2f2', border: '1px solid #fecaca',
+            borderRadius: 'var(--radius-md)', marginBottom: '16px',
+            fontSize: '13px', color: '#dc2626',
+          }}>
+            {error}
+          </div>
+        )}
+
+        {/* Empty state — no current conversation */}
+        {!hasMessages && !isLoading && !error && (
+          <div className="empty-state">
+            <div className="empty-state-icon">
+              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="11" cy="11" r="8" />
+                <path d="m21 21-4.3-4.3" />
+              </svg>
+            </div>
+            <h3>Search everything, everywhere</h3>
+            <p>
+              Ask a question or search across all your connected apps &mdash; Gmail, Drive, Slack & more.
+              Use the mic for voice search.
+            </p>
+            {!googleConnected && (
+              <button
+                onClick={() => setShowSettings(true)}
+                style={{
+                  marginTop: '16px', padding: '8px 20px',
+                  background: 'var(--accent)', color: 'white', border: 'none',
+                  borderRadius: 'var(--radius-full)', fontSize: '13px',
+                  fontWeight: 600, cursor: 'pointer',
+                }}
+              >
+                Connect your apps to get started
+              </button>
+            )}
+            <div className="hint-chips">
+              {HINT_QUERIES.map((hint) => (
+                <button
+                  key={hint}
+                  className="hint-chip"
+                  onClick={() => {
+                    setQuery(hint);
+                    handleSearch(hint);
+                  }}
+                >
+                  {hint}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <div ref={chatEndRef} />
+      </div>
+
+      {/* Listening Indicator */}
+      {isListening && (
+        <div style={{ padding: '0 20px' }}>
+          <div className="listening-indicator">
+            <div className="listening-bars">
+              <span /><span /><span /><span /><span />
+            </div>
+            <span className="listening-text">
+              {transcript || 'Listening — speak your query...'}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Search Input — always at bottom */}
       <div className="search-area">
         <form onSubmit={handleSubmit}>
           <div className="search-box">
@@ -427,97 +843,6 @@ export function App() {
             </button>
           </div>
         </form>
-      </div>
-
-      {/* Listening Indicator */}
-      {isListening && (
-        <div style={{ padding: '0 20px' }}>
-          <div className="listening-indicator">
-            <div className="listening-bars">
-              <span /><span /><span /><span /><span />
-            </div>
-            <span className="listening-text">
-              {transcript || 'Listening — speak your query...'}
-            </span>
-          </div>
-        </div>
-      )}
-
-      {/* Results Area */}
-      <div className="results-area">
-        {isLoading && (
-          <div className="loading-container">
-            <div className="loading-dots">
-              <span /><span /><span />
-            </div>
-            <div className="loading-text">Searching across your apps...</div>
-          </div>
-        )}
-
-        {error && !isLoading && (
-          <div style={{
-            padding: '16px', background: '#fef2f2', border: '1px solid #fecaca',
-            borderRadius: 'var(--radius-md)', marginBottom: '16px',
-            fontSize: '13px', color: '#dc2626',
-          }}>
-            {error}
-          </div>
-        )}
-
-        {response && !isLoading && (
-          <>
-            <div className="ai-response">
-              <div className="label">AI Summary</div>
-              {response.answer}
-            </div>
-            {response.results.map((result) => (
-              <ResultCard key={result.id} result={result} />
-            ))}
-          </>
-        )}
-
-        {!response && !isLoading && !error && (
-          <div className="empty-state">
-            <div className="empty-state-icon">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8" />
-                <path d="m21 21-4.3-4.3" />
-              </svg>
-            </div>
-            <h3>Search everything, everywhere</h3>
-            <p>
-              Ask a question or search across all your connected apps — Gmail, Drive, Slack & more.
-              Use the mic for voice search.
-            </p>
-            {!googleConnected && (
-              <button
-                onClick={() => setShowSettings(true)}
-                style={{
-                  marginTop: '16px', padding: '8px 20px',
-                  background: 'var(--accent)', color: 'white', border: 'none',
-                  borderRadius: 'var(--radius-full)', fontSize: '13px',
-                  fontWeight: 600, cursor: 'pointer',
-                }}
-              >
-                Connect your apps to get started
-              </button>
-            )}
-            <div className="hint-chips">
-              {HINT_QUERIES.map((hint) => (
-                <button
-                  key={hint}
-                  className="hint-chip"
-                  onClick={() => {
-                    setQuery(hint);
-                    handleSearch(hint);
-                  }}
-                >
-                  {hint}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );
