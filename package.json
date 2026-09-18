@@ -1,0 +1,11 @@
+{
+  "name": "forgetmenot",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev:backend": "cd backend && npm run dev",
+    "dev:extension": "cd extension && npm run dev",
+    "build": "cd extension && npm run build && cd ../backend && npm run build",
+    "setup": "cd extension && npm install && cd ../backend && npm install"
+  }
+}
