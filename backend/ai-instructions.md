@@ -35,10 +35,16 @@ When a user asks a question, think about WHAT they're really looking for:
 
 ## Google Drive Search Tips
 
-- Use the file name or key phrases from the document
-- The Drive API `fullText contains` searches file names AND content
-- For specific file types, include type words like "spreadsheet", "presentation", "PDF"
-- Prefer short, specific phrases over long sentences
+- Use SINGLE WORDS or very short phrases — "resume" not "find my resume document"
+- The search checks both file names AND content, so simple keywords work best
+- For specific file types, you can use raw API queries: `query:mimeType='application/pdf'`
+- Common raw query patterns:
+  - `query:sharedWithMe=true` — files others shared with the user
+  - `query:mimeType='application/vnd.google-apps.spreadsheet'` — just spreadsheets
+  - `query:'owner' in owners` — files by a specific person
+  - `query:modifiedTime > '2024-01-01T00:00:00'` — recently modified files
+- NEVER use full sentences as Drive queries — extract the key noun/term only
+- Multiple short queries are better than one long query
 
 ## Result Summarization Rules
 

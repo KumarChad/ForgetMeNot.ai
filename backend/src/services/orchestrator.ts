@@ -67,43 +67,41 @@ async function generateSearchStrategies(
   const instructions = getAIInstructions();
   const start = Date.now();
 
-  const prompt = `You are a search query generator for Gmail and Google Drive APIs. Your job is to convert a natural language question into optimized API search queries.
+  const prompt = `You are a search query generator. Convert natural language into Gmail and Google Drive search queries.
 
-IMPORTANT: You must return ONLY valid JSON, no markdown, no explanation.
+CRITICAL: Return ONLY valid JSON. No markdown, no backticks, no explanation text.
 
-Given the user's query, generate targeted search queries using the correct operators for each platform.
+## Gmail operators:
+- from:name, to:name, subject:word
+- has:attachment, filename:pdf
+- newer_than:7d, after:2024/01/01, before:2024/12/31
+- is:starred, label:name, in:sent
+- Combine: "from:john subject:budget has:attachment"
 
-## Gmail Search Operators you can use:
-- from:name — emails from a person
-- to:name — emails to a person  
-- subject:word — word in subject line
-- has:attachment — emails with attachments
-- filename:ext — attachments with specific extension (pdf, xlsx, docx, etc.)
-- after:YYYY/MM/DD — emails after date
-- before:YYYY/MM/DD — emails before date
-- newer_than:Nd — emails from last N days (e.g. newer_than:7d, newer_than:30d)
-- is:starred — starred emails
-- label:name — emails with label
-- in:sent — sent emails
-- Combine multiple operators in one query: "from:john subject:budget has:attachment"
-
-## Google Drive search:
-- Use short specific phrases (the API does fullText search)
-- Include file type words if relevant ("spreadsheet", "presentation", "report")
-- Use the most distinctive words from the query
+## Google Drive queries:
+- Extract ONLY the core noun or key term — strip filler words (find, my, the, show, me, where, is)
+- Use SINGLE WORDS or short 2-word phrases maximum
+- The search checks both file names AND file content, so simple keywords work best
+- Generate 1-3 queries: first = most specific term, second = a synonym or alternate spelling, third (optional) = a raw API query
+- Raw API queries use prefix "query:" for advanced filters:
+  - "query:mimeType='application/pdf'" — only PDFs
+  - "query:mimeType='application/vnd.google-apps.spreadsheet'" — only spreadsheets
+  - "query:sharedWithMe=true" — files shared with the user
+  - "query:modifiedTime > '2024-01-01T00:00:00'" — recently modified
 
 ## Rules:
-1. Generate 1-3 Gmail queries and 1-2 Drive queries
-2. Use operators when the query implies them (person → from:, time → newer_than:, etc.)
-3. Always include at least one broad keyword query per platform as a fallback
-4. Identify the user's intent: "people", "documents", "time-based", "topic", or "general"
+1. Generate 1-3 Gmail queries and 1-3 Drive queries
+2. Gmail: use operators when the query implies them (person name → from:, time reference → newer_than:, file type → filename:)
+3. Drive: always have at least one single-word query that is the core noun the user wants
+4. Drive: NEVER pass full sentences — only extracted keywords
+5. Include one broad fallback query per platform (just the main keyword alone)
+6. Identify intent: "people", "documents", "time-based", "topic", or "general"
 
 User query: "${query}"
 ${context ? `User is currently viewing: ${context.title} (${context.domain})` : ''}
 Today's date: ${new Date().toISOString().split('T')[0]}
 
-Return this exact JSON format:
-{"gmail_queries": ["query1", "query2"], "drive_queries": ["query1"], "intent": "topic"}`;
+Return JSON: {"gmail_queries": [...], "drive_queries": [...], "intent": "..."}`;
 
   try {
     const response = await queryBedrock(prompt, {
@@ -138,8 +136,16 @@ Return this exact JSON format:
       error: (e as Error).message,
     });
     console.error('Failed to generate search strategies, using fallback:', e);
+    // Smart fallback: extract keywords instead of using the whole query
+    const stopWords = new Set(['find', 'my', 'the', 'a', 'an', 'me', 'show', 'get', 'where', 'is', 'are', 'was', 'what', 'can', 'you', 'i', 'do', 'from', 'in', 'to', 'of', 'for', 'with', 'about', 'that', 'this']);
+    const keywords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w));
+    const driveQuery = keywords.slice(0, 2).join(' ') || query;
     return {
-      strategies: { gmail_queries: [query], drive_queries: [query], intent: 'general' },
+      strategies: {
+        gmail_queries: [query, keywords[0] || query],
+        drive_queries: [driveQuery, keywords[0] || query],
+        intent: 'general',
+      },
       latencyMs,
     };
   }

@@ -61,40 +61,110 @@ export async function searchGmail(
   return results;
 }
 
+/**
+ * Search Google Drive using BOTH name and fullText queries.
+ * The query string can be:
+ * - A plain keyword search (searches name + content)
+ * - A raw Drive API query starting with "query:" (passed directly)
+ */
 export async function searchDrive(
   auth: Auth.OAuth2Client,
   query: string
 ): Promise<SearchResult[]> {
   const drive = google.drive({ version: 'v3', auth });
+  const allFiles: any[] = [];
+  const seenIds = new Set<string>();
 
-  const response = await drive.files.list({
-    q: `fullText contains '${query.replace(/'/g, "\\'")}'`,
-    fields: 'files(id, name, mimeType, modifiedTime, owners, webViewLink, description)',
-    pageSize: 5,
-    orderBy: 'modifiedTime desc',
-  });
-
-  if (!response.data.files || response.data.files.length === 0) {
-    return [];
+  // Check if it's a raw API query
+  if (query.startsWith('query:')) {
+    const rawQuery = query.slice(6).trim();
+    try {
+      const response = await drive.files.list({
+        q: rawQuery,
+        fields: 'files(id, name, mimeType, modifiedTime, owners, webViewLink, description)',
+        pageSize: 5,
+        orderBy: 'modifiedTime desc',
+      });
+      if (response.data.files) {
+        for (const f of response.data.files) {
+          if (f.id && !seenIds.has(f.id)) {
+            seenIds.add(f.id);
+            allFiles.push(f);
+          }
+        }
+      }
+    } catch (e: any) {
+      console.error(`Drive raw query error for "${rawQuery}":`, e.message);
+    }
+    return filesToResults(allFiles);
   }
 
-  return response.data.files.map((file) => {
-    const mimeToType: Record<string, string> = {
-      'application/vnd.google-apps.document': 'document',
-      'application/vnd.google-apps.spreadsheet': 'spreadsheet',
-      'application/vnd.google-apps.presentation': 'presentation',
-      'application/pdf': 'file',
-    };
+  // Escape single quotes for the Drive API
+  const escaped = query.replace(/'/g, "\\'");
 
-    return {
-      id: `drive-${file.id}`,
-      source: 'drive' as const,
-      type: mimeToType[file.mimeType || ''] || 'file',
-      title: file.name || 'Untitled',
-      snippet: file.description || `${file.name} — last modified ${new Date(file.modifiedTime || '').toLocaleDateString()}`,
-      url: file.webViewLink || `https://drive.google.com/file/d/${file.id}`,
-      timestamp: file.modifiedTime || new Date().toISOString(),
-      author: file.owners?.[0]?.displayName ?? undefined,
-    };
-  });
+  // Strategy 1: Search by file name (catches files named "resume", "budget", etc.)
+  try {
+    const nameResponse = await drive.files.list({
+      q: `name contains '${escaped}' and trashed = false`,
+      fields: 'files(id, name, mimeType, modifiedTime, owners, webViewLink, description)',
+      pageSize: 5,
+      orderBy: 'modifiedTime desc',
+    });
+    if (nameResponse.data.files) {
+      for (const f of nameResponse.data.files) {
+        if (f.id && !seenIds.has(f.id)) {
+          seenIds.add(f.id);
+          allFiles.push(f);
+        }
+      }
+    }
+  } catch (e: any) {
+    console.error(`Drive name search error for "${query}":`, e.message);
+  }
+
+  // Strategy 2: Search by full text content (catches content inside docs)
+  try {
+    const contentResponse = await drive.files.list({
+      q: `fullText contains '${escaped}' and trashed = false`,
+      fields: 'files(id, name, mimeType, modifiedTime, owners, webViewLink, description)',
+      pageSize: 5,
+      orderBy: 'modifiedTime desc',
+    });
+    if (contentResponse.data.files) {
+      for (const f of contentResponse.data.files) {
+        if (f.id && !seenIds.has(f.id)) {
+          seenIds.add(f.id);
+          allFiles.push(f);
+        }
+      }
+    }
+  } catch (e: any) {
+    console.error(`Drive fullText search error for "${query}":`, e.message);
+  }
+
+  return filesToResults(allFiles);
+}
+
+function filesToResults(files: any[]): SearchResult[] {
+  const mimeToType: Record<string, string> = {
+    'application/vnd.google-apps.document': 'document',
+    'application/vnd.google-apps.spreadsheet': 'spreadsheet',
+    'application/vnd.google-apps.presentation': 'presentation',
+    'application/vnd.google-apps.folder': 'folder',
+    'application/pdf': 'file',
+    'image/png': 'file',
+    'image/jpeg': 'file',
+    'application/zip': 'file',
+  };
+
+  return files.map((file) => ({
+    id: `drive-${file.id}`,
+    source: 'drive' as const,
+    type: mimeToType[file.mimeType || ''] || 'file',
+    title: file.name || 'Untitled',
+    snippet: file.description || `${file.name} — last modified ${new Date(file.modifiedTime || '').toLocaleDateString()}`,
+    url: file.webViewLink || `https://drive.google.com/file/d/${file.id}`,
+    timestamp: file.modifiedTime || new Date().toISOString(),
+    author: file.owners?.[0]?.displayName ?? undefined,
+  }));
 }

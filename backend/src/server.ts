@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import { searchRouter } from './routes/search';
-import { authRouter } from './routes/auth';
+import { authRouter, initTokens } from './routes/auth';
 import { downloadRouter } from './routes/download';
 import { metrics } from './services/metrics';
 
@@ -45,8 +45,14 @@ app.post('/api/action', async (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`\n  🌸 ForgetMeNot Backend running on http://localhost:${PORT}`);
-  console.log(`  📡 Health check: http://localhost:${PORT}/api/health
-  📈 Metrics:      http://localhost:${PORT}/api/metrics\n`);
+  console.log(`  📡 Health check: http://localhost:${PORT}/api/health`);
+  console.log(`  📈 Metrics:      http://localhost:${PORT}/api/metrics`);
+  console.log(`  🔒 Token store:  DynamoDB (${process.env.DYNAMODB_TABLE || 'ForgetMeNot-Tokens'})`);
+
+  // Load saved tokens from DynamoDB on startup
+  await initTokens();
+
+  console.log('');
 });

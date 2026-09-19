@@ -1,9 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { google } from 'googleapis';
+import { saveTokens, loadTokens, hasTokens } from '../services/tokenStore';
 
 export const authRouter = Router();
 
-const tokenStore: Record<string, Record<string, any>> = {};
+// In-memory cache for the OAuth client so sync callers still work
+let cachedGoogleClient: ReturnType<typeof getGoogleOAuthClient> | null = null;
 
 function getGoogleOAuthClient() {
   return new google.auth.OAuth2(
@@ -13,14 +15,40 @@ function getGoogleOAuthClient() {
   );
 }
 
-authRouter.get('/status', (_req: Request, res: Response) => {
+/**
+ * On startup, load tokens from DynamoDB into memory so getGoogleAuth() works immediately.
+ */
+export async function initTokens(): Promise<void> {
+  const tokens = await loadTokens('default', 'google');
+  if (tokens) {
+    const client = getGoogleOAuthClient();
+    client.setCredentials(tokens);
+
+    // Auto-refresh: save new tokens back when they get refreshed
+    client.on('tokens', async (newTokens) => {
+      const existing = await loadTokens('default', 'google');
+      const merged = { ...existing, ...newTokens };
+      await saveTokens('default', 'google', merged);
+      console.log('  🔄 Google tokens refreshed and saved');
+    });
+
+    cachedGoogleClient = client;
+    console.log('  ✅ Google tokens loaded from DynamoDB');
+  } else {
+    console.log('  ℹ️  No saved Google tokens — connect via the extension');
+  }
+}
+
+authRouter.get('/status', async (_req: Request, res: Response) => {
+  const googleConnected = cachedGoogleClient !== null || await hasTokens('default', 'google');
+
   res.json({
     google: {
-      connected: !!tokenStore['default']?.google,
+      connected: googleConnected,
       scopes: ['gmail.readonly', 'drive.readonly'],
     },
     slack: {
-      connected: !!tokenStore['default']?.slack,
+      connected: await hasTokens('default', 'slack'),
       scopes: ['search:read', 'channels:read'],
     },
   });
@@ -54,10 +82,19 @@ authRouter.get('/google/callback', async (req: Request, res: Response) => {
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
 
-    if (!tokenStore['default']) tokenStore['default'] = {};
-    tokenStore['default'].google = tokens;
+    // Save to DynamoDB (encrypted at rest)
+    await saveTokens('default', 'google', tokens);
 
-    console.log('✅ Google OAuth connected successfully');
+    // Update in-memory client
+    oauth2Client.on('tokens', async (newTokens) => {
+      const existing = await loadTokens('default', 'google');
+      const merged = { ...existing, ...newTokens };
+      await saveTokens('default', 'google', merged);
+      console.log('  🔄 Google tokens refreshed and saved');
+    });
+    cachedGoogleClient = oauth2Client;
+
+    console.log('✅ Google OAuth connected — tokens saved to DynamoDB');
 
     res.send(`
       <html>
@@ -77,15 +114,10 @@ authRouter.get('/google/callback', async (req: Request, res: Response) => {
   }
 });
 
-export function getTokens(userId: string = 'default') {
-  return tokenStore[userId] || {};
-}
-
-export function getGoogleAuth(userId: string = 'default'): ReturnType<typeof getGoogleOAuthClient> | null {
-  const tokens = tokenStore[userId]?.google;
-  if (!tokens) return null;
-
-  const client = getGoogleOAuthClient();
-  client.setCredentials(tokens);
-  return client;
+/**
+ * Get authenticated Google OAuth client (sync, from memory cache).
+ * Call initTokens() on startup to populate from DynamoDB.
+ */
+export function getGoogleAuth(): ReturnType<typeof getGoogleOAuthClient> | null {
+  return cachedGoogleClient;
 }
