@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
 import dotenv from 'dotenv';
 import { searchRouter } from './routes/search';
 import { authRouter, initTokens } from './routes/auth';
@@ -16,6 +17,9 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+
+// Serve landing page
+app.use(express.static(path.join(__dirname, '..', 'landing')));
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
