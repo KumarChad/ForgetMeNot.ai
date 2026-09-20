@@ -1,4 +1,5 @@
-const API_BASE = 'http://localhost:3001';
+const API_BASE = 'http://18.212.41.218:3001';
+const MAX_DRAG_FILE_BYTES = 12 * 1024 * 1024;
 
 // Open side panel when the extension icon is clicked (or Ctrl+Shift+K)
 chrome.action.onClicked.addListener(async (tab) => {
@@ -114,6 +115,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     return true;
   }
 
+  if (message.type === 'GET_DRIVE_FILE') {
+    getDriveFile(message.fileId)
+      .then(sendResponse)
+      .catch((err) => sendResponse({ error: err.message }));
+    return true;
+  }
+
   if (message.type === 'ONBOARDING_DONE') {
     chrome.storage.local.set({ onboardingDone: true });
     return false;
@@ -174,4 +182,44 @@ async function getActiveTabContext() {
     };
   }
   return { url: '', title: '', domain: '' };
+}
+
+/**
+ * Download a Drive result in the extension service worker. Content scripts run
+ * under the visited page's security rules, so this keeps HTTPS pages from
+ * making mixed-content requests to the HTTP demo backend.
+ */
+async function getDriveFile(fileId: unknown) {
+  if (typeof fileId !== 'string' || !fileId) {
+    throw new Error('A Drive file ID is required');
+  }
+
+  const response = await fetch(`${API_BASE}/api/download/drive/${encodeURIComponent(fileId)}`);
+  if (!response.ok) {
+    throw new Error(`Could not download the Drive file: ${response.statusText}`);
+  }
+
+  const declaredSize = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declaredSize) && declaredSize > MAX_DRAG_FILE_BYTES) {
+    throw new Error('This file is too large to prepare for drag and drop');
+  }
+
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.byteLength > MAX_DRAG_FILE_BYTES) {
+    throw new Error('This file is too large to prepare for drag and drop');
+  }
+
+  return {
+    data: bytesToBase64(bytes),
+    mimeType: response.headers.get('content-type')?.split(';')[0] || 'application/octet-stream',
+  };
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
 }

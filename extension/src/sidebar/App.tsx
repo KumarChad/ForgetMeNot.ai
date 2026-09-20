@@ -10,13 +10,6 @@ import {
   addMessageToConversation,
 } from './chatHistory';
 
-const HINT_QUERIES = [
-  'Find the budget doc Sarah shared',
-  'Unread emails about the project',
-  'Latest messages in #general',
-  'Meeting notes from last week',
-];
-
 const SOURCE_ICONS: Record<string, string> = {
   gmail: '✉️',
   drive: '📁',
@@ -58,7 +51,7 @@ function formatConvoTime(ts: number): string {
   }
 }
 
-const API_BASE = 'http://localhost:3001';
+const API_BASE = 'http://18.212.41.218:3001';
 
 /**
  * Extracts the raw file ID from our result IDs (e.g. "drive-abc123" → "abc123")
@@ -95,8 +88,41 @@ function getFilenameFromResult(result: SearchResult): string {
   return title;
 }
 
+function fileFromBase64(data: string, filename: string, mimeType: string): File {
+  const binary = atob(data);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index++) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new File([bytes], filename, { type: mimeType });
+}
+
 function ResultCard({ result }: { result: SearchResult }) {
   const [isDragging, setIsDragging] = useState(false);
+  const [preparedFile, setPreparedFile] = useState<File | null>(null);
+  const [isPreparingFile, setIsPreparingFile] = useState(false);
+
+  const prepareDriveFile = async () => {
+    if (result.source !== 'drive' || preparedFile || isPreparingFile) return;
+
+    setIsPreparingFile(true);
+    try {
+      const payload = await chrome.runtime.sendMessage({
+        type: 'GET_DRIVE_FILE',
+        fileId: extractFileId(result),
+      });
+      if (payload?.error) throw new Error(payload.error);
+      setPreparedFile(fileFromBase64(
+        payload.data,
+        getFilenameFromResult(result),
+        payload.mimeType || 'application/octet-stream',
+      ));
+    } catch (err) {
+      console.warn('Could not prepare Drive file for dragging:', err);
+    } finally {
+      setIsPreparingFile(false);
+    }
+  };
 
   const handleDragStart = (e: React.DragEvent) => {
     setIsDragging(true);
@@ -114,7 +140,14 @@ function ResultCard({ result }: { result: SearchResult }) {
       e.dataTransfer.setData('DownloadURL', `${mime}:${filename}:${downloadUrl}`);
     }
 
-    e.dataTransfer.effectAllowed = 'copyLink';
+    // A prepared Drive document can be accepted as a real file by compatible
+    // web-app drop zones. Keep the link payload above as a fallback.
+    if (preparedFile) {
+      e.dataTransfer.items.add(preparedFile);
+      e.dataTransfer.effectAllowed = 'copy';
+    } else {
+      e.dataTransfer.effectAllowed = 'copyLink';
+    }
 
     // Custom drag image
     const ghost = document.createElement('div');
@@ -136,6 +169,7 @@ function ResultCard({ result }: { result: SearchResult }) {
       draggable
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
+      onMouseEnter={() => { void prepareDriveFile(); }}
       style={{
         opacity: isDragging ? 0.6 : 1,
         cursor: 'grab',
@@ -161,7 +195,9 @@ function ResultCard({ result }: { result: SearchResult }) {
         <div style={{
           color: 'var(--text-muted)', fontSize: '11px', flexShrink: 0,
           opacity: 0.5, marginLeft: '4px',
-        }} title="Drag to any app">
+        }} title={result.source === 'drive'
+          ? (preparedFile ? 'File ready to drop' : isPreparingFile ? 'Preparing file…' : 'Hover, then drag to attach the file')
+          : 'Drag source link to any app'}>
           ☰
         </div>
       </div>
@@ -458,10 +494,7 @@ export function App() {
         <div className="sidebar-header">
           <div className="logo-area">
             <div className="logo-icon">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8" />
-                <path d="m21 21-4.3-4.3" />
-              </svg>
+              <svg viewBox="0 0 100 100" aria-hidden="true"><defs><radialGradient id="fmnBloomGrad" cx="50%" cy="50%" r="62%"><stop offset="0%" stopColor="#c2d8f2" /><stop offset="52%" stopColor="#6f9fdb" /><stop offset="100%" stopColor="#3f6fb5" /></radialGradient></defs><circle cx="50" cy="28" r="19" fill="url(#fmnBloomGrad)" /><circle cx="71" cy="43" r="19" fill="url(#fmnBloomGrad)" /><circle cx="63" cy="68" r="19" fill="url(#fmnBloomGrad)" /><circle cx="37" cy="68" r="19" fill="url(#fmnBloomGrad)" /><circle cx="29" cy="43" r="19" fill="url(#fmnBloomGrad)" /><circle cx="50" cy="50" r="12.5" fill="#ffffff" /><circle cx="50" cy="50" r="6.5" fill="#f2c250" /></svg>
             </div>
             <div className="logo-text">ForgetMeNot</div>
           </div>
@@ -602,10 +635,7 @@ export function App() {
       <div className="sidebar-header">
         <div className="logo-area">
           <div className="logo-icon">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="11" cy="11" r="8" />
-              <path d="m21 21-4.3-4.3" />
-            </svg>
+            <svg viewBox="0 0 100 100" aria-hidden="true"><defs><radialGradient id="fmnBloomGrad" cx="50%" cy="50%" r="62%"><stop offset="0%" stopColor="#c2d8f2" /><stop offset="52%" stopColor="#6f9fdb" /><stop offset="100%" stopColor="#3f6fb5" /></radialGradient></defs><circle cx="50" cy="28" r="19" fill="url(#fmnBloomGrad)" /><circle cx="71" cy="43" r="19" fill="url(#fmnBloomGrad)" /><circle cx="63" cy="68" r="19" fill="url(#fmnBloomGrad)" /><circle cx="37" cy="68" r="19" fill="url(#fmnBloomGrad)" /><circle cx="29" cy="43" r="19" fill="url(#fmnBloomGrad)" /><circle cx="50" cy="50" r="12.5" fill="#ffffff" /><circle cx="50" cy="50" r="6.5" fill="#f2c250" /></svg>
           </div>
           <div className="logo-text">ForgetMeNot</div>
         </div>
@@ -745,10 +775,7 @@ export function App() {
         {!hasMessages && !isLoading && !error && (
           <div className="empty-state">
             <div className="empty-state-icon">
-              <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="11" cy="11" r="8" />
-                <path d="m21 21-4.3-4.3" />
-              </svg>
+              <svg viewBox="0 0 100 100" aria-hidden="true"><defs><radialGradient id="fmnBloomGrad" cx="50%" cy="50%" r="62%"><stop offset="0%" stopColor="#c2d8f2" /><stop offset="52%" stopColor="#6f9fdb" /><stop offset="100%" stopColor="#3f6fb5" /></radialGradient></defs><circle cx="50" cy="28" r="19" fill="url(#fmnBloomGrad)" /><circle cx="71" cy="43" r="19" fill="url(#fmnBloomGrad)" /><circle cx="63" cy="68" r="19" fill="url(#fmnBloomGrad)" /><circle cx="37" cy="68" r="19" fill="url(#fmnBloomGrad)" /><circle cx="29" cy="43" r="19" fill="url(#fmnBloomGrad)" /><circle cx="50" cy="50" r="12.5" fill="#ffffff" /><circle cx="50" cy="50" r="6.5" fill="#f2c250" /></svg>
             </div>
             <h3>Search everything, everywhere</h3>
             <p>
@@ -768,20 +795,6 @@ export function App() {
                 Connect your apps to get started
               </button>
             )}
-            <div className="hint-chips">
-              {HINT_QUERIES.map((hint) => (
-                <button
-                  key={hint}
-                  className="hint-chip"
-                  onClick={() => {
-                    setQuery(hint);
-                    handleSearch(hint);
-                  }}
-                >
-                  {hint}
-                </button>
-              ))}
-            </div>
           </div>
         )}
 

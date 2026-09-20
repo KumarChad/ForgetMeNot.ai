@@ -33,30 +33,21 @@ interface SearchStrategies {
   intent: string;
 }
 
-// ─── Mock results for when no Google auth is connected ───────────────
-function getMockResults(query: string): SearchResult[] {
-  return [
-    {
-      id: 'mock-1',
-      source: 'drive',
-      type: 'document',
-      title: 'Q3 2024 Budget Planning',
-      snippet: `Found a match for "${query}" — Revenue projections and departmental budget allocations for Q3.`,
-      url: 'https://docs.google.com/document/d/example',
-      timestamp: new Date(Date.now() - 2 * 86400000).toISOString(),
-      author: 'Sarah Chen',
-    },
-    {
-      id: 'mock-2',
-      source: 'gmail',
-      type: 'email',
-      title: 'Re: Budget Review Meeting Notes',
-      snippet: 'Hi team, attached are the final numbers from our budget review.',
-      url: 'https://mail.google.com/mail/u/0/#inbox/example',
-      timestamp: new Date(Date.now() - 3 * 86400000).toISOString(),
-      author: 'David Park',
-    },
-  ];
+const STOP_WORDS = new Set([
+  'find', 'my', 'the', 'a', 'an', 'me', 'show', 'get', 'where', 'is', 'are', 'was', 'were',
+  'what', 'which', 'who', 'can', 'you', 'i', 'do', 'did', 'from', 'in', 'to', 'of', 'for',
+  'with', 'about', 'that', 'this', 'and', 'or', 'on', 'at', 'by', 'it', 'any', 'all', 'some',
+  'please', 'need', 'want', 'looking', 'search', 'give', 'tell', 'last', 'recent',
+]);
+
+/** Pull the meaningful keywords out of a natural-language query. */
+function extractKeywords(query: string): string {
+  const words = query
+    .toLowerCase()
+    .split(/\s+/)
+    .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ''))
+    .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
+  return words.slice(0, 4).join(' ');
 }
 
 // ─── Step 1: AI generates targeted search queries ────────────────────
@@ -92,9 +83,9 @@ CRITICAL: Return ONLY valid JSON. No markdown, no backticks, no explanation text
 ## Rules:
 1. Generate 1-3 Gmail queries and 1-3 Drive queries
 2. Gmail: use operators when the query implies them (person name → from:, time reference → newer_than:, file type → filename:)
-3. Drive: always have at least one single-word query that is the core noun the user wants
-4. Drive: NEVER pass full sentences — only extracted keywords
-5. Include one broad fallback query per platform (just the main keyword alone)
+3. Gmail: ALWAYS include one loose query that is just the keywords with NO operators, so an over-specific operator query can't return nothing
+4. Drive: always have at least one single-word query that is the core noun the user wants
+5. Drive: NEVER pass full sentences — only extracted keywords
 6. Identify intent: "people", "documents", "time-based", "topic", or "general"
 
 User query: "${query}"
@@ -111,20 +102,18 @@ Return JSON: {"gmail_queries": [...], "drive_queries": [...], "intent": "..."}`;
     });
 
     const latencyMs = Date.now() - start;
-    metrics.recordBedrockCall({
-      timestamp: Date.now(),
-      latencyMs,
-      purpose: 'query_gen',
-      success: true,
-    });
 
+    // Robust JSON extraction — pull the first {...} block out even if the model
+    // wraps it in prose or code fences.
     const cleaned = response.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    const strategies = JSON.parse(cleaned) as SearchStrategies;
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    const strategies = JSON.parse(jsonMatch ? jsonMatch[0] : cleaned) as SearchStrategies;
 
-    if (!strategies.gmail_queries || !strategies.drive_queries) {
+    if (!Array.isArray(strategies.gmail_queries) || !Array.isArray(strategies.drive_queries)) {
       throw new Error('Invalid strategy format');
     }
 
+    metrics.recordBedrockCall({ timestamp: Date.now(), latencyMs, purpose: 'query_gen', success: true });
     return { strategies, latencyMs };
   } catch (e) {
     const latencyMs = Date.now() - start;
@@ -136,14 +125,13 @@ Return JSON: {"gmail_queries": [...], "drive_queries": [...], "intent": "..."}`;
       error: (e as Error).message,
     });
     console.error('Failed to generate search strategies, using fallback:', e);
-    // Smart fallback: extract keywords instead of using the whole query
-    const stopWords = new Set(['find', 'my', 'the', 'a', 'an', 'me', 'show', 'get', 'where', 'is', 'are', 'was', 'what', 'can', 'you', 'i', 'do', 'from', 'in', 'to', 'of', 'for', 'with', 'about', 'that', 'this']);
-    const keywords = query.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w));
-    const driveQuery = keywords.slice(0, 2).join(' ') || query;
+    // Smart fallback: extract keywords instead of using the whole sentence
+    const keywords = extractKeywords(query);
+    const firstWord = keywords.split(' ')[0] || query;
     return {
       strategies: {
-        gmail_queries: [query, keywords[0] || query],
-        drive_queries: [driveQuery, keywords[0] || query],
+        gmail_queries: [keywords || query, firstWord],
+        drive_queries: [keywords || query, firstWord],
         intent: 'general',
       },
       latencyMs,
@@ -185,31 +173,40 @@ function scoreAndRankResults(
   intent: string
 ): SearchResult[] {
   const queryLower = query.toLowerCase();
-  const queryWords = queryLower.split(/\s+/).filter((w) => w.length > 2);
+  const queryWords = queryLower
+    .split(/\s+/)
+    .map((w) => w.replace(/[^\p{L}\p{N}]/gu, ''))
+    .filter((w) => w.length > 2 && !STOP_WORDS.has(w));
 
   const scored = results.map((result) => {
-    let score = 0;
+    // Baseline: it came back from a search, so it matched *something* (important
+    // for Drive content matches that don't surface in the title/snippet).
+    let score = 5;
     const titleLower = (result.title || '').toLowerCase();
     const snippetLower = (result.snippet || '').toLowerCase();
     const authorLower = (result.author || '').toLowerCase();
 
-    if (titleLower.includes(queryLower)) score += 50;
+    if (queryLower.length > 2 && titleLower.includes(queryLower)) score += 50;
 
+    let matched = 0;
     for (const word of queryWords) {
-      if (titleLower.includes(word)) score += 15;
-      if (snippetLower.includes(word)) score += 5;
-      if (authorLower.includes(word)) score += 20;
+      let hit = false;
+      if (titleLower.includes(word)) { score += 15; hit = true; }
+      if (snippetLower.includes(word)) { score += 6; hit = true; }
+      if (authorLower.includes(word)) { score += 20; hit = true; }
+      if (hit) matched++;
     }
+    // Reward covering more of the query's terms
+    if (queryWords.length > 0) score += Math.round((matched / queryWords.length) * 20);
 
-    const age = Date.now() - new Date(result.timestamp).getTime();
-    const daysOld = age / 86400000;
-    if (daysOld < 1) score += 30;
-    else if (daysOld < 3) score += 20;
-    else if (daysOld < 7) score += 10;
-    else if (daysOld < 30) score += 5;
+    // Recency — capped so it nudges but never overrides relevance
+    const daysOld = (Date.now() - new Date(result.timestamp).getTime()) / 86400000;
+    if (daysOld < 1) score += 12;
+    else if (daysOld < 7) score += 8;
+    else if (daysOld < 30) score += 4;
 
-    if (intent === 'people' && result.source === 'gmail') score += 10;
-    if (intent === 'documents' && result.source === 'drive') score += 10;
+    if (intent === 'people' && result.source === 'gmail') score += 8;
+    if (intent === 'documents' && result.source === 'drive') score += 8;
 
     return { ...result, relevanceScore: score };
   });
@@ -282,22 +279,11 @@ Write a helpful 2-3 sentence summary. Rules:
     });
 
     const latencyMs = Date.now() - start;
-    metrics.recordBedrockCall({
-      timestamp: Date.now(),
-      latencyMs,
-      purpose: 'summarize',
-      success: true,
-    });
-
+    metrics.recordBedrockCall({ timestamp: Date.now(), latencyMs, purpose: 'summarize', success: true });
     return { answer, latencyMs };
   } catch {
     const latencyMs = Date.now() - start;
-    metrics.recordBedrockCall({
-      timestamp: Date.now(),
-      latencyMs,
-      purpose: 'summarize',
-      success: false,
-    });
+    metrics.recordBedrockCall({ timestamp: Date.now(), latencyMs, purpose: 'summarize', success: false });
     const topResult = results[0];
     return {
       answer: `Your top match is "${topResult.title}" from ${topResult.source === 'gmail' ? 'Gmail' : 'Google Drive'}${topResult.author ? ` by ${topResult.author}` : ''}. Found ${results.length} results total.`,
@@ -317,6 +303,18 @@ export async function orchestrateSearch(
   // Step 1: Generate smart search strategies
   console.log(`\n🔍 ForgetMeNot search: "${query}"`);
   const { strategies, latencyMs: aiQueryGenMs } = await generateSearchStrategies(query, context);
+
+  // Always guarantee a loose keyword-only query on both platforms, so an
+  // over-constrained operator query (e.g. from:x subject:y) can't zero out recall.
+  const broad = extractKeywords(query);
+  if (broad) {
+    if (!strategies.gmail_queries.includes(broad)) strategies.gmail_queries.push(broad);
+    if (!strategies.drive_queries.includes(broad)) strategies.drive_queries.push(broad);
+  }
+  // Cap the number of queries so we don't hammer the APIs.
+  strategies.gmail_queries = strategies.gmail_queries.filter(Boolean).slice(0, 4);
+  strategies.drive_queries = strategies.drive_queries.filter(Boolean).slice(0, 4);
+
   console.log(`   📧 Gmail queries: ${strategies.gmail_queries.join(' | ')}`);
   console.log(`   📁 Drive queries: ${strategies.drive_queries.join(' | ')}`);
   console.log(`   🎯 Intent: ${strategies.intent}`);
@@ -337,10 +335,8 @@ export async function orchestrateSearch(
     gmailCount = allResults.filter((r) => r.source === 'gmail').length;
     driveCount = allResults.filter((r) => r.source === 'drive').length;
   } else {
-    allResults = getMockResults(query);
-    gmailCount = allResults.filter((r) => r.source === 'gmail').length;
-    driveCount = allResults.filter((r) => r.source === 'drive').length;
-    console.log('   ⚠️  No Google auth — using mock results');
+    allResults = [];
+    console.log('   ⚠️  No Google auth — returning no results');
   }
 
   const apiSearchMs = Date.now() - apiSearchStart;
