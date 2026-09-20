@@ -32,6 +32,9 @@ When a user asks a question, think about WHAT they're really looking for:
 - `label:name` — emails with a specific label
 - `in:sent` — sent emails
 - Combine operators: `from:john subject:budget has:attachment`
+- `(resume OR cv OR curriculum)` — OR groups match ANY term; use them to catch synonyms and alternate names for the same thing
+- Bare keywords use AND and match whole words only, so keep keyword-only queries short (1-2 words) and use OR groups for synonyms instead of piling on words
+- For things that usually arrive as attachments (resume, invoice, report), combine `has:attachment` with an OR group: `has:attachment (resume OR cv)`
 
 ## Google Drive Search Tips
 

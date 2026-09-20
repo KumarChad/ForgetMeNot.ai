@@ -67,7 +67,9 @@ CRITICAL: Return ONLY valid JSON. No markdown, no backticks, no explanation text
 - has:attachment, filename:pdf
 - newer_than:7d, after:2024/01/01, before:2024/12/31
 - is:starred, label:name, in:sent
+- OR groups: "(resume OR cv OR curriculum)" matches ANY of the terms — use these to catch synonyms / alternate names for the same thing
 - Combine: "from:john subject:budget has:attachment"
+- IMPORTANT: bare keywords are matched with AND (every word must be present) and only match whole words. Keep keyword-only queries to 1-2 words, and expand synonyms with an OR group instead of stacking more words.
 
 ## Google Drive queries:
 - Extract ONLY the core noun or key term — strip filler words (find, my, the, show, me, where, is)
@@ -82,8 +84,9 @@ CRITICAL: Return ONLY valid JSON. No markdown, no backticks, no explanation text
 
 ## Rules:
 1. Generate 1-3 Gmail queries and 1-3 Drive queries
-2. Gmail: use operators when the query implies them (person name → from:, time reference → newer_than:, file type → filename:)
-3. Gmail: ALWAYS include one loose query that is just the keywords with NO operators, so an over-specific operator query can't return nothing
+2. Gmail: use operators when the query implies them (person name → from:, time reference → newer_than:, file type → filename:) — but never stack more than TWO operators in one query
+3. Gmail: ALWAYS include (a) one single-keyword query — the core noun alone, e.g. "resume" — and (b) one loose OR-group query expanding obvious synonyms, e.g. "(resume OR cv OR curriculum vitae)", so an over-specific operator query can't return nothing
+7. Attachments: when the user wants something that usually arrives as a file (resume, invoice, report, deck), add a Gmail query combining has:attachment with the synonym OR-group, e.g. "has:attachment (resume OR cv)"
 4. Drive: always have at least one single-word query that is the core noun the user wants
 5. Drive: NEVER pass full sentences — only extracted keywords
 6. Identify intent: "people", "documents", "time-based", "topic", or "general"
@@ -310,6 +313,13 @@ export async function orchestrateSearch(
   if (broad) {
     if (!strategies.gmail_queries.includes(broad)) strategies.gmail_queries.push(broad);
     if (!strategies.drive_queries.includes(broad)) strategies.drive_queries.push(broad);
+    // Guarantee a single-keyword, high-recall Gmail query. Gmail matches whole
+    // words with AND, so a multi-word bare query can still zero out — the lone
+    // top keyword can't.
+    const topKeyword = broad.split(' ')[0];
+    if (topKeyword && !strategies.gmail_queries.includes(topKeyword)) {
+      strategies.gmail_queries.push(topKeyword);
+    }
   }
   // Cap the number of queries so we don't hammer the APIs.
   strategies.gmail_queries = strategies.gmail_queries.filter(Boolean).slice(0, 4);
