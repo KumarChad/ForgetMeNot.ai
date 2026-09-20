@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="extension/public/icons/icon128.png" width="80" />
+  <img src=".github/bloom.svg" width="80" alt="ForgetMeNot — forget-me-not flower logo" />
 </p>
 
 <h1 align="center">ForgetMeNot</h1>
@@ -903,38 +903,111 @@ saveTokens() → encrypt → DynamoDB PutItem + update memory cache
 Log "🔄 Google tokens refreshed and saved"
 ```
 
-### AWS Infrastructure
+### AWS SDK v3 — Real Usage, Not a Wrapper
 
-```
-┌─────────────────────────────────────────────┐
-│              AWS us-east-1                  │
-│                                             │
-│  ┌─────────────────────┐                    │
-│  │   Amazon Bedrock    │                    │
-│  │                     │                    │
-│  │  Nova Lite v1       │◄── Converse API    │
-│  │  (on-demand)        │    2 calls/search  │
-│  │                     │                    │
-│  └─────────────────────┘                    │
-│                                             │
-│  ┌─────────────────────┐                    │
-│  │   DynamoDB          │                    │
-│  │                     │                    │
-│  │  ForgetMeNot-Tokens │◄── Token CRUD      │
-│  │  (on-demand cap.)   │    AES-256-GCM     │
-│  │  TTL: 90 days       │    encrypted       │
-│  └─────────────────────┘                    │
-│                                             │
-│  ┌─────────────────────┐                    │
-│  │   EC2               │                    │
-│  │                     │                    │
-│  │  Express backend    │◄── Port 3001       │
-│  │  (18.212.41.218)    │    Node.js 18+     │
-│  └─────────────────────┘                    │
-└─────────────────────────────────────────────┘
+ForgetMeNot uses the **modular AWS SDK v3 for JavaScript** — the tree-shakeable, per-service package architecture (not the monolithic `aws-sdk` v2). Two packages are installed as direct production dependencies:
+
+```json
+{
+  "@aws-sdk/client-bedrock-runtime": "^3.1136.0",
+  "@aws-sdk/client-dynamodb": "^3.700.0",
+  "@aws-sdk/lib-dynamodb": "^3.700.0"
+}
 ```
 
-**Auth:** All AWS calls use the default credential provider chain — `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` from environment variables. The same credentials serve both Bedrock and DynamoDB. No IAM roles or instance profiles needed for local dev; on EC2, an instance role with `bedrock:InvokeModel` and `dynamodb:GetItem/PutItem/DeleteItem` permissions is sufficient.
+**SDK classes and commands used throughout the codebase:**
+
+| Package | Import | Where Used | Purpose |
+|---------|--------|------------|---------|
+| `@aws-sdk/client-bedrock-runtime` | `BedrockRuntimeClient` | `services/bedrock.ts` | Singleton client, shared across all AI calls |
+| `@aws-sdk/client-bedrock-runtime` | `ConverseCommand` | `services/bedrock.ts` | Send prompt → get completion (not `InvokeModel` — Converse is the newer unified API) |
+| `@aws-sdk/client-dynamodb` | `DynamoDBClient` | `services/tokenStore.ts` | Low-level client, wrapped by DocumentClient |
+| `@aws-sdk/lib-dynamodb` | `DynamoDBDocumentClient` | `services/tokenStore.ts` | High-level client with automatic marshalling (JS objects ↔ DynamoDB types) |
+| `@aws-sdk/lib-dynamodb` | `GetCommand` | `services/tokenStore.ts` | Read a single token record by PK+SK |
+| `@aws-sdk/lib-dynamodb` | `PutCommand` | `services/tokenStore.ts` | Write/overwrite encrypted tokens |
+| `@aws-sdk/lib-dynamodb` | `DeleteCommand` | `services/tokenStore.ts` | Remove tokens on disconnect |
+
+**Client initialization pattern:** Both clients are lazily instantiated as module-level singletons — created on first use, reused for all subsequent calls. Region comes from `AWS_REGION` env var (defaults to `us-east-1`):
+
+```typescript
+// Bedrock — one shared client for all AI calls
+let _client: BedrockRuntimeClient | null = null;
+function getClient(): BedrockRuntimeClient {
+  if (!_client) {
+    _client = new BedrockRuntimeClient({ region: process.env.AWS_REGION || 'us-east-1' });
+  }
+  return _client;
+}
+
+// DynamoDB — DocumentClient wraps the base client with marshalling options
+let docClient: DynamoDBDocumentClient | null = null;
+function getDocClient(): DynamoDBDocumentClient {
+  if (!docClient) {
+    const client = new DynamoDBClient({ region: process.env.AWS_REGION || 'us-east-1' });
+    docClient = DynamoDBDocumentClient.from(client, {
+      marshallOptions: { removeUndefinedValues: true },
+    });
+  }
+  return docClient;
+}
+```
+
+**Credential resolution:** Both clients use the **default credential provider chain** — the SDK automatically checks `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` env vars, then `~/.aws/credentials`, then EC2 instance metadata. The same credentials serve Bedrock and DynamoDB. No hardcoded keys in code.
+
+### Amazon EC2 — Backend Hosting
+
+The Express backend runs on an EC2 instance at `18.212.41.218` in `us-east-1`, serving the API on port 3001. The instance runs Node.js 18+ with `tsx` for TypeScript execution. It also serves the landing page as static files.
+
+The EC2 instance's security group exposes port 3001 for the Chrome extension to reach the API. The instance uses the same region as Bedrock and DynamoDB, keeping inter-service latency minimal (same-region calls).
+
+### AWS Infrastructure Map
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                       AWS us-east-1                          │
+│                                                              │
+│  ┌──────────────────────┐    ┌──────────────────────┐        │
+│  │   Amazon Bedrock     │    │      DynamoDB         │        │
+│  │                      │    │                      │        │
+│  │  Model: Nova Lite v1 │    │  Table:              │        │
+│  │  API: Converse       │    │  ForgetMeNot-Tokens  │        │
+│  │  SDK: BedrockRuntime │    │  SDK: DynamoDBDoc    │        │
+│  │  Client + Converse   │    │  Client + Get/Put/   │        │
+│  │  Command             │    │  DeleteCommand       │        │
+│  │                      │    │                      │        │
+│  │  2 calls/search:     │    │  AES-256-GCM at rest │        │
+│  │  • query gen (0.2t)  │    │  TTL: 90 day auto-   │        │
+│  │  • summarize (0.5t)  │    │  cleanup             │        │
+│  └──────────┬───────────┘    └──────────┬───────────┘        │
+│             │  ConverseCommand          │ Get/Put/Delete     │
+│             │                           │                    │
+│  ┌──────────┴───────────────────────────┴───────────┐        │
+│  │                    EC2 Instance                   │        │
+│  │               18.212.41.218:3001                  │        │
+│  │                                                   │        │
+│  │   Express Server (Node.js 18+ / TypeScript)       │        │
+│  │                                                   │        │
+│  │   ┌─────────────┐  ┌────────────┐  ┌──────────┐  │        │
+│  │   │ Orchestrator │  │ Token Store│  │ Metrics  │  │        │
+│  │   │ (search      │  │ (encrypt + │  │ (in-mem  │  │        │
+│  │   │  pipeline)   │  │  persist)  │  │  stats)  │  │        │
+│  │   └─────────────┘  └────────────┘  └──────────┘  │        │
+│  │                                                   │        │
+│  │   AWS SDK v3 default credential provider chain    │        │
+│  │   (env vars → credentials file → instance role)   │        │
+│  └───────────────────────────────────────────────────┘        │
+│                          │                                    │
+│                          │ Port 3001 (HTTP)                   │
+└──────────────────────────┼────────────────────────────────────┘
+                           │
+              Chrome Extension (client)
+```
+
+**Why these specific AWS services:**
+
+- **Bedrock (not OpenAI/Anthropic API):** Keeps everything in the AWS ecosystem — same credentials, same region, no external API keys. Nova Lite is cheap and fast for structured JSON generation.
+- **DynamoDB (not RDS/Redis):** Serverless, zero maintenance, pay-per-request pricing, built-in TTL for automatic token expiry. The access pattern (single-item reads/writes by composite key) is a perfect DynamoDB fit.
+- **EC2 (not Lambda):** The Express server maintains an in-memory OAuth client and metrics state across requests. Lambda's cold starts and stateless model would require rearchitecting around external session stores.
 
 ---
 
