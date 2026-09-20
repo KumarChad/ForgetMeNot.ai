@@ -255,7 +255,7 @@
       const fileName = filenameForResult(r);
       const driveFileId = r.source === 'drive' ? rawId : '';
       return `
-        <li><a class="fmn-item" href="${escapeHtml(r.url)}" target="_blank" rel="noopener" draggable="true"
+        <li><div class="fmn-item" draggable="true" role="button" tabindex="0"
                data-url="${escapeHtml(r.url)}" data-download-url="${escapeHtml(downloadUrl)}" data-drive-file-id="${escapeHtml(driveFileId)}" data-filename="${escapeHtml(fileName)}">
           <div class="fmn-badge ${badge.cls}">${badge.letter}</div>
           <div class="fmn-it">
@@ -264,7 +264,7 @@
             <div class="fmn-m">${r.author ? escapeHtml(r.author) + ' · ' : ''}${sourceLabel(r.source)} · ${timeAgo(r.timestamp)}</div>
           </div>
           <span class="fmn-hand">&#10287;</span>
-        </a></li>`;
+        </div></li>`;
     }).join('');
 
     const stack = overlay.querySelector('.fmn-stack');
@@ -311,10 +311,17 @@
           .catch(() => item.setAttribute('title', 'File unavailable — dragging its source link instead'));
       });
 
+      el.addEventListener('click', () => {
+        const u = (el as HTMLElement).getAttribute('data-url');
+        if (u) window.open(u, '_blank', 'noopener');
+      });
+
       el.addEventListener('dragstart', (e: Event) => {
         const de = e as DragEvent;
         const item = de.currentTarget as HTMLElement;
         item.classList.add('fmn-dragging');
+        de.stopPropagation();
+        de.dataTransfer!.clearData();
         const url = item.getAttribute('data-url') || '';
         const downloadUrl = item.getAttribute('data-download-url') || '';
         const driveFileId = item.getAttribute('data-drive-file-id') || '';
