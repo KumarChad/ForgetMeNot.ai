@@ -460,6 +460,40 @@
     .cta h2 em { font-style: italic; color: var(--petal-deep); }
     .cta p { font-size: 18px; color: var(--ink-soft); margin-bottom: 32px; font-weight: 300; }
 
+    /* ── Waitlist signup form ────────────────── */
+    .signup-form { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; max-width: 480px; margin: 0 auto; }
+    .signup-input {
+      flex: 1; min-width: 220px; padding: 14px 20px; font-family: var(--sans); font-size: 15px; font-weight: 400;
+      color: var(--ink); background: var(--paper); border: 1.5px solid var(--line); border-radius: 999px;
+      outline: none; transition: border-color .3s, box-shadow .3s;
+    }
+    .signup-input::placeholder { color: var(--ink-faint); }
+    .signup-input:focus { border-color: var(--petal); box-shadow: 0 0 0 3px rgba(91, 143, 214, 0.15); }
+    .signup-btn {
+      display: inline-flex; align-items: center; gap: 8px; padding: 14px 28px;
+      font-family: var(--sans); font-size: 15px; font-weight: 500; color: #fff; cursor: pointer;
+      background: linear-gradient(135deg, #86aee6 0%, #6b9bd9 100%); border: none; border-radius: 999px;
+      box-shadow: 0 6px 18px rgba(120, 160, 220, 0.30);
+      transition: background .45s ease, box-shadow .45s ease, transform .2s;
+    }
+    .signup-btn:hover { background: linear-gradient(135deg, #7ba6e2 0%, #5487cc 100%); box-shadow: 0 12px 30px rgba(107, 155, 217, 0.42); }
+    .signup-btn:active { transform: scale(0.97); }
+    .signup-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+    .signup-btn svg { transition: transform .55s cubic-bezier(.2,.7,.2,1); }
+    .signup-btn:hover svg { transform: translateX(3px); }
+    .signup-success {
+      display: none; text-align: center; padding: 18px 24px;
+      background: var(--petal-wash); border: 1.5px solid var(--petal-light); border-radius: 16px;
+      max-width: 420px; margin: 0 auto;
+    }
+    .signup-success.show { display: block; }
+    .signup-success .check-icon { width: 40px; height: 40px; margin: 0 auto 10px; color: var(--leaf); }
+    .signup-success h3 { font-family: var(--serif); font-size: 24px; font-weight: 500; color: var(--ink); margin-bottom: 6px; }
+    .signup-success p { font-size: 15px; color: var(--ink-soft); font-weight: 300; margin: 0; }
+    .signup-error { display: none; color: #d45; font-size: 13px; text-align: center; margin-top: 8px; font-weight: 400; }
+    .signup-error.show { display: block; }
+    .signup-count { font-size: 13px; color: var(--ink-faint); margin-top: 16px; font-weight: 300; }
+
     /* ── Footer ──────────────────────────────── */
     footer { border-top: 1px solid var(--line); padding: 34px 24px; text-align: center; color: var(--ink-faint); font-size: 14px; position: relative; z-index: 1; font-weight: 300; }
     footer .foot-logo { display: inline-flex; align-items: center; gap: 8px; font-family: var(--serif); font-size: 20px; color: var(--ink-soft); margin-bottom: 8px; font-weight: 500; }
@@ -549,7 +583,7 @@
           <span class="gh-num" aria-label="GitHub stars">—</span>
         </span>
       </a>
-      <a href="#install" class="btn btn-primary"><span class="lbl">Add to Chrome</span></a>
+      <a href="#waitlist" class="btn btn-primary"><span class="lbl">Join Waitlist</span></a>
     </div>
   </nav>
 
@@ -605,13 +639,13 @@
     </h1>
     <p class="lede">ForgetMeNot searches across your Gmail, Drive, Slack and more — reading your scattered apps so you don't have to remember where anything lives.</p>
     <div class="hero-cta">
-      <a href="#install" class="btn btn-primary">
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="21.17" y1="8" x2="12" y2="8"/><line x1="3.95" y1="6.06" x2="8.54" y2="14"/><line x1="10.88" y1="21.94" x2="15.46" y2="14"/></svg>
-        <span class="lbl">Add to Chrome — Free</span>
+      <a href="#waitlist" class="btn btn-primary">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><path d="m22 6-10 7L2 6"/></svg>
+        <span class="lbl">Join the Waitlist</span>
       </a>
       <a href="#how" class="btn btn-secondary"><span class="lbl">See how it works →</span></a>
     </div>
-    <p class="hero-note">No credit card. Connects in 30 seconds with Google.</p>
+    <p class="hero-note">Be the first to try ForgetMeNot when it launches.</p>
   </section>
 
   <!-- Demo mockup -->
@@ -793,19 +827,32 @@
     </div>
   </section>
 
-  <!-- CTA -->
-  <section class="cta" id="install">
+  <!-- Waitlist CTA -->
+  <section class="cta" id="waitlist">
     <div class="decor" aria-hidden="true">
       <svg data-parallax="0.10" style="left:12%; top:26%; width:46px" viewBox="0 0 100 100"><use href="#bloom"/></svg>
       <svg data-parallax="-0.08" style="right:14%; top:34%; width:38px" viewBox="0 0 100 100"><use href="#bloom"/></svg>
     </div>
     <svg class="cta-sprig" viewBox="0 0 100 100" aria-hidden="true"><use href="#bloom"/></svg>
-    <h2>Never lose track<br><em>of anything again</em></h2>
-    <p>Let ForgetMeNot remember where everything lives, so you don't have to.</p>
-    <a href="#" class="btn btn-primary" style="font-size:16px; padding:15px 32px;">
-      <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><line x1="21.17" y1="8" x2="12" y2="8"/><line x1="3.95" y1="6.06" x2="8.54" y2="14"/><line x1="10.88" y1="21.94" x2="15.46" y2="14"/></svg>
-      <span class="lbl">Add ForgetMeNot to Chrome — It's Free</span>
-    </a>
+    <h2>Be the first to<br><em>never lose anything</em></h2>
+    <p>Sign up for early access — we'll let you know the moment ForgetMeNot is ready.</p>
+
+    <form id="waitlistForm" class="signup-form" onsubmit="return false;">
+      <input type="email" class="signup-input" id="waitlistEmail" placeholder="you@email.com" required autocomplete="email" />
+      <button type="submit" class="signup-btn" id="waitlistBtn">
+        <span class="lbl">Get Early Access</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      </button>
+    </form>
+    <div class="signup-error" id="signupError"></div>
+
+    <div class="signup-success" id="signupSuccess">
+      <svg class="check-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>
+      <h3>You're on the list</h3>
+      <p>We'll send you an email as soon as ForgetMeNot is ready to try.</p>
+    </div>
+
+    <p class="signup-count">Join <strong id="signupCountNum">the first</strong> people on the waitlist.</p>
   </section>
 
   <!-- Footer -->
@@ -944,6 +991,46 @@
       const chip = a => '<div class="app-logo"><span class="app-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">' + a.d + '</svg></span>' + a.n + '</div>';
       const one = apps.map(chip).join('');
       track.innerHTML = one + one; // duplicate for seamless -50% loop
+    })();
+
+    // ── waitlist signup ──
+    (function () {
+      const form = document.getElementById('waitlistForm');
+      const emailInput = document.getElementById('waitlistEmail');
+      const btn = document.getElementById('waitlistBtn');
+      const successDiv = document.getElementById('signupSuccess');
+      const errorDiv = document.getElementById('signupError');
+      if (!form) return;
+
+      const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwtPLC55bGtcopFvM25rZhs8y7ZqLSmTePG9Yd0Dd4sp5UwvVm4d5hSRXVf17CgBLe-hw/exec';
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = emailInput.value.trim();
+        if (!email) return;
+
+        btn.disabled = true;
+        btn.querySelector('.lbl').textContent = 'Joining…';
+        errorDiv.classList.remove('show');
+
+        try {
+          const res = await fetch(SCRIPT_URL, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'email=' + encodeURIComponent(email) + '&timestamp=' + encodeURIComponent(new Date().toISOString())
+          });
+          // no-cors means we can't read the response, but if it didn't throw, it went through
+          form.style.display = 'none';
+          successDiv.classList.add('show');
+          document.querySelector('.signup-count')?.remove();
+        } catch (err) {
+          errorDiv.textContent = 'Something went wrong — please try again.';
+          errorDiv.classList.add('show');
+          btn.disabled = false;
+          btn.querySelector('.lbl').textContent = 'Get Early Access';
+        }
+      });
     })();
 
     // ── parallax drift + scroll-driven spin ──
