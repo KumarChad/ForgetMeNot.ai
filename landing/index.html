@@ -502,14 +502,117 @@
     footer a:hover { text-decoration: underline; }
 
     /* ── Responsive ──────────────────────────── */
+
+    /* Tablet */
     @media (max-width: 760px) {
       .nav-links a:not(.btn), .navseg { display: none; }
       .demo-sidebar { display: none; }
       .demo-content { min-height: 220px; }
+      .hero { padding: 120px 20px 32px; }
+      .hero h1 { font-size: clamp(34px, 8vw, 52px); }
+      .sprig { width: 160px; height: 160px; }
+      .section-head h2 { font-size: clamp(28px, 6vw, 40px); }
+      .cta h2 { font-size: clamp(28px, 6vw, 42px); }
+      .vine-row h3 { font-size: 22px; }
     }
+
+    /* Mobile */
     @media (max-width: 560px) {
-      .step { gap: 16px; }
-      .step-num { width: 40px; font-size: 34px; }
+      /* Nav */
+      nav { padding: 10px 16px; }
+      .nav-logo { font-size: 20px; gap: 8px; }
+      .nav-logo svg { width: 24px; height: 24px; }
+      .lb-flowers { display: none; }
+      .nav-links { gap: 10px; }
+      .nav-links .theme { display: none; }
+      .nav-links .gh-star { display: none; }
+      .nav-links .btn-primary { padding: 9px 16px; font-size: 13px; }
+
+      /* Hero */
+      .hero { padding: 100px 16px 24px; }
+      .hero h1 { font-size: 32px; line-height: 1.1; }
+      .rotator { height: 1.18em; }
+      .sprig { width: 120px; height: 120px; }
+      .spotlight { width: 100vw; height: 300px; top: 40px; }
+      .hero .lede { font-size: 15px; margin-bottom: 24px; }
+      .hero-cta { flex-direction: column; align-items: center; gap: 10px; }
+      .hero-cta .btn { width: 100%; max-width: 300px; justify-content: center; }
+      .hero-note { font-size: 12px; }
+      .eyebrow { font-size: 10px; letter-spacing: 1.8px; }
+
+      /* Demo */
+      .demo-section { padding: 24px 16px 50px; }
+      .demo-frame { padding: 10px; border-radius: 14px; }
+      .demo-content { padding: 14px; min-height: 180px; }
+      .demo-page-bar { width: 70%; }
+      .demo-page-img { height: 80px; }
+
+      /* Sections */
+      section.block { padding: 50px 0; }
+      .section-head { margin-bottom: 36px; }
+      .section-head h2 { font-size: 28px; }
+      .section-head p { font-size: 15px; }
+      .wrap { padding-inline: 16px; }
+
+      /* Features vine */
+      .vine::before { left: 22px; }
+      .vine::after { left: 20.5px; }
+      .vine-row { grid-template-columns: 44px 1fr; column-gap: 14px; padding: 10px 0; }
+      .vine-node { grid-column: 1; width: 44px; height: 44px; }
+      .vbloom { width: 44px; height: 44px; }
+      .vine-row.left .vcontent, .vine-row.right .vcontent { grid-column: 2; justify-self: start; text-align: left; max-width: none; }
+      .vine-row.left .vfeat-ic { margin-left: 0; }
+      .vine-row.left .vhead { flex-direction: row; }
+      .vine-row.left .vleaf, .vine-row.right .vleaf { left: auto; right: -9px; transform: rotate(26deg); }
+      .vine-row h3 { font-size: 19px; }
+      .vteaser, .vdetail p { font-size: 14px; }
+      .vfeat-ic { width: 22px; height: 22px; }
+
+      /* How it works */
+      .step { gap: 14px; padding: 18px 0; }
+      .step-num { width: 36px; font-size: 30px; }
+      .step-body h3 { font-size: 20px; }
+      .step-body p { font-size: 14px; }
+
+      /* App marquee */
+      .app-logo { padding: 0 24px; font-size: 20px; }
+      .app-ic { width: 24px; height: 24px; }
+
+      /* Built with */
+      .built { padding: 40px 16px; }
+      .tech-badge { padding: 6px 12px; font-size: 12px; }
+      .tech-badges { gap: 8px; }
+
+      /* CTA / Waitlist */
+      .cta { padding: 60px 16px 70px; }
+      .cta-sprig { width: 64px; height: 64px; }
+      .cta h2 { font-size: 28px; }
+      .cta p { font-size: 15px; margin-bottom: 24px; }
+      .signup-form { flex-direction: column; align-items: stretch; max-width: 320px; }
+      .signup-input { min-width: unset; width: 100%; padding: 13px 18px; font-size: 15px; }
+      .signup-btn { justify-content: center; padding: 13px 24px; }
+      .signup-success { padding: 16px 18px; }
+      .signup-success h3 { font-size: 20px; }
+      .signup-success p { font-size: 14px; }
+
+      /* Dividers */
+      .divider .stem { width: min(80px, 18vw); }
+      .divider svg { width: 22px; height: 22px; }
+
+      /* Footer */
+      footer { padding: 24px 16px; font-size: 13px; }
+      footer .foot-logo { font-size: 17px; }
+
+      /* Decorative blooms — reduce clutter on small screens */
+      .decor svg { opacity: .07; }
+    }
+
+    /* Very small phones */
+    @media (max-width: 380px) {
+      .hero h1 { font-size: 26px; }
+      .sprig { width: 100px; height: 100px; }
+      .section-head h2, .cta h2 { font-size: 24px; }
+      .nav-logo { font-size: 18px; }
     }
   </style>
 </head>
